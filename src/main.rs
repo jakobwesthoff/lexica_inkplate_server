@@ -1,8 +1,12 @@
+mod dithering;
+
 use std::io::Write;
 
 use image::GenericImage;
 // use image::GenericImageView;
 use rand::Rng;
+
+use crate::dithering::{quantize_to_3bit, Dithering, floyd_steinberg};
 
 fn create_fake_headers() -> anyhow::Result<curl::easy::List> {
     let mut headers: curl::easy::List = curl::easy::List::new();
@@ -91,56 +95,54 @@ fn main() -> anyhow::Result<()> {
 
     let image = image::load_from_memory(&dst)?;
     let (width, height) = image.dimensions();
-    let aspect_ratio: f64 = width as f64 / height as f64;
     let target_width = 600u32;
     let target_height = 448u32;
+
+    let (new_width, new_height) = get_cover_dimensions(width, height, target_width, target_height);
+    let mut resized = image::imageops::resize(
+        &image,
+        new_width,
+        new_height,
+        image::imageops::FilterType::Lanczos3,
+    );
+    let analyzer = smartcrop::Analyzer::new(smartcrop::CropSettings::default());
+    let crop = analyzer
+        .find_best_crop(
+            &resized,
+            std::num::NonZeroU32::new(target_width).unwrap(),
+            std::num::NonZeroU32::new(target_height).unwrap(),
+        )
+        .unwrap()
+        .crop;
+
+    let cropped = image::imageops::crop(&mut resized, crop.x, crop.y, crop.width, crop.height).to_image();
+    cropped.save("output_resized_cropped.png")?;
+
+    let dithered = quantize_to_3bit(&image::DynamicImage::ImageRgba8(cropped), floyd_steinberg());
+    dithered.save("output_dithered_grayscale.png")?;
+    // let carved = seamcarving::resize(&resized, target_width, target_height);
+    // carved.save("output_carved.png")?;
+
+    Ok(())
+}
+
+fn get_cover_dimensions(
+    width: u32,
+    height: u32,
+    target_width: u32,
+    target_height: u32,
+) -> (u32, u32) {
+    let aspect_ratio: f64 = width as f64 / height as f64;
     let target_aspect_ratio = target_width as f64 / target_height as f64;
 
     if aspect_ratio < target_aspect_ratio {
         // scale to width and cut height
         let new_width = target_width;
         let new_height = (new_width as f64 / aspect_ratio).round() as u32;
-        let mut resized = image::imageops::resize(
-            &image,
-            new_width,
-            new_height,
-            image::imageops::FilterType::Lanczos3,
-        );
-        let analyzer = smartcrop::Analyzer::new(smartcrop::CropSettings::default());
-        let crop = analyzer.find_best_crop(
-            &resized,
-            std::num::NonZeroU32::new(target_width).unwrap(),
-            std::num::NonZeroU32::new(target_height).unwrap(),
-        ).unwrap().crop;
-
-        let cropped = image::imageops::crop(&mut resized, crop.x, crop.y, crop.width, crop.height );
-        cropped.to_image().save("output_resized_cropped.png")?;
-
-        // let carved = seamcarving::resize(&resized, target_width, target_height);
-        // carved.save("output_carved.png")?;
+        return (new_width, new_height);
     } else {
-        // scale to height and cut width
         let new_height = target_height;
         let new_width = (new_height as f64 * aspect_ratio).round() as u32;
-        let mut resized = image::imageops::resize(
-            &image,
-            new_width,
-            new_height,
-            image::imageops::FilterType::Lanczos3,
-        );
-        let analyzer = smartcrop::Analyzer::new(smartcrop::CropSettings::default());
-        let crop = analyzer.find_best_crop(
-            &resized,
-            std::num::NonZeroU32::new(target_width).unwrap(),
-            std::num::NonZeroU32::new(target_height).unwrap(),
-        ).unwrap().crop;
-
-        let cropped = image::imageops::crop(&mut resized, crop.x, crop.y, crop.width, crop.height );
-        cropped.to_image().save("output_resized_cropped.png")?;
-
-        // let carved = seamcarving::resize(&resized, target_width, target_height);
-        // carved.save("output_carved.png")?;
+        return (new_width, new_height);
     }
-
-    Ok(())
 }
