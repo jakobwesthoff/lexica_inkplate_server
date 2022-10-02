@@ -1,6 +1,7 @@
 use std::io::Write;
 
-use anyhow::Context;
+use image::GenericImage;
+// use image::GenericImageView;
 use rand::Rng;
 
 fn create_fake_headers() -> anyhow::Result<curl::easy::List> {
@@ -50,7 +51,10 @@ fn main() -> anyhow::Result<()> {
     let script = document.select(&selector).next().unwrap();
 
     let v: serde_json::Value = serde_json::from_str(script.inner_html().as_str())?;
-    let prompts = v["props"]["pageProps"]["trpcState"]["json"]["queries"][0]["state"]["data"]["pages"][0]["prompts"].as_array().unwrap();
+    let prompts = v["props"]["pageProps"]["trpcState"]["json"]["queries"][0]["state"]["data"]
+        ["pages"][0]["prompts"]
+        .as_array()
+        .unwrap();
 
     let mut rng = rand::thread_rng();
     let prompt_index = rng.gen_range(0..prompts.len());
@@ -64,12 +68,11 @@ fn main() -> anyhow::Result<()> {
     let image_url = format!("https://image.lexica.art/md/{}", id);
     println!("{}", image_url);
 
-
     let mut easy = curl::easy::Easy::new();
     easy.url(image_url.as_str())?;
 
     let mut headers = create_fake_headers()?;
-    headers.append("Accept: image/avif,image/webp,*/*")?;
+    headers.append("Accept: image/jpeg,*/*")?;
     easy.http_headers(headers)?;
 
     let mut dst = Vec::new();
@@ -85,6 +88,59 @@ fn main() -> anyhow::Result<()> {
     let mut file = std::fs::File::create("output.jpg")?;
     file.write_all(&dst)?;
     drop(file);
+
+    let image = image::load_from_memory(&dst)?;
+    let (width, height) = image.dimensions();
+    let aspect_ratio: f64 = width as f64 / height as f64;
+    let target_width = 600u32;
+    let target_height = 448u32;
+    let target_aspect_ratio = target_width as f64 / target_height as f64;
+
+    if aspect_ratio < target_aspect_ratio {
+        // scale to width and cut height
+        let new_width = target_width;
+        let new_height = (new_width as f64 / aspect_ratio).round() as u32;
+        let mut resized = image::imageops::resize(
+            &image,
+            new_width,
+            new_height,
+            image::imageops::FilterType::Lanczos3,
+        );
+        let analyzer = smartcrop::Analyzer::new(smartcrop::CropSettings::default());
+        let crop = analyzer.find_best_crop(
+            &resized,
+            std::num::NonZeroU32::new(target_width).unwrap(),
+            std::num::NonZeroU32::new(target_height).unwrap(),
+        ).unwrap().crop;
+
+        let cropped = image::imageops::crop(&mut resized, crop.x, crop.y, crop.width, crop.height );
+        cropped.to_image().save("output_resized_cropped.png")?;
+
+        // let carved = seamcarving::resize(&resized, target_width, target_height);
+        // carved.save("output_carved.png")?;
+    } else {
+        // scale to height and cut width
+        let new_height = target_height;
+        let new_width = (new_height as f64 * aspect_ratio).round() as u32;
+        let mut resized = image::imageops::resize(
+            &image,
+            new_width,
+            new_height,
+            image::imageops::FilterType::Lanczos3,
+        );
+        let analyzer = smartcrop::Analyzer::new(smartcrop::CropSettings::default());
+        let crop = analyzer.find_best_crop(
+            &resized,
+            std::num::NonZeroU32::new(target_width).unwrap(),
+            std::num::NonZeroU32::new(target_height).unwrap(),
+        ).unwrap().crop;
+
+        let cropped = image::imageops::crop(&mut resized, crop.x, crop.y, crop.width, crop.height );
+        cropped.to_image().save("output_resized_cropped.png")?;
+
+        // let carved = seamcarving::resize(&resized, target_width, target_height);
+        // carved.save("output_carved.png")?;
+    }
 
     Ok(())
 }
