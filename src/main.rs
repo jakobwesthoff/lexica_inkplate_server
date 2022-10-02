@@ -6,7 +6,10 @@ use image::GenericImage;
 // use image::GenericImageView;
 use rand::Rng;
 
-use crate::dithering::{quantize_to_3bit, Dithering, floyd_steinberg};
+use crate::dithering::{
+    apply_error_diffusion, floyd_steinberg, jarvis_judice_ninke, palette_7_acep,
+    palette_8_grayscale, Dithering,
+};
 
 fn create_fake_headers() -> anyhow::Result<curl::easy::List> {
     let mut headers: curl::easy::List = curl::easy::List::new();
@@ -61,67 +64,78 @@ fn main() -> anyhow::Result<()> {
         .unwrap();
 
     let mut rng = rand::thread_rng();
-    let prompt_index = rng.gen_range(0..prompts.len());
-    let prompt = &prompts[prompt_index];
-    let images = prompt["images"].as_array().unwrap();
-    let image_index = rng.gen_range(0..images.len());
-    let image = &images[image_index];
+    for prompt_index in rand::seq::index::sample(&mut rng, prompts.len(), 32) {
+        // let prompt_index = rng.gen_range(0..prompts.len());
+        let prompt = &prompts[prompt_index];
+        let images = prompt["images"].as_array().unwrap();
+        let image_index = rng.gen_range(0..images.len());
+        let image = &images[image_index];
 
-    let id = &image["id"].as_str().unwrap();
+        let id = image["id"].as_str().unwrap();
 
-    let image_url = format!("https://image.lexica.art/md/{}", id);
-    println!("{}", image_url);
+        let image_url = format!("https://image.lexica.art/md/{}", id);
+        println!("{}", image_url);
 
-    let mut easy = curl::easy::Easy::new();
-    easy.url(image_url.as_str())?;
+        let mut easy = curl::easy::Easy::new();
+        easy.url(image_url.as_str())?;
 
-    let mut headers = create_fake_headers()?;
-    headers.append("Accept: image/jpeg,*/*")?;
-    easy.http_headers(headers)?;
+        let mut headers = create_fake_headers()?;
+        headers.append("Accept: image/jpeg,*/*")?;
+        easy.http_headers(headers)?;
 
-    let mut dst = Vec::new();
-    {
-        let mut transfer = easy.transfer();
-        transfer.write_function(|data| {
-            dst.extend_from_slice(data);
-            Ok(data.len())
-        })?;
-        transfer.perform()?;
+        let mut dst = Vec::new();
+        {
+            let mut transfer = easy.transfer();
+            transfer.write_function(|data| {
+                dst.extend_from_slice(data);
+                Ok(data.len())
+            })?;
+            transfer.perform()?;
+        }
+
+        let mut file = std::fs::File::create(format!("v_{}_{}", id, "output.jpg"))?;
+        file.write_all(&dst)?;
+        drop(file);
+
+        let image = image::load_from_memory(&dst)?;
+        let (width, height) = image.dimensions();
+        let target_width = 448u32;
+        let target_height = 600u32;
+
+        let (new_width, new_height) =
+            get_cover_dimensions(width, height, target_width, target_height);
+
+        let mut resized = image::imageops::resize(
+            &image,
+            new_width,
+            new_height,
+            image::imageops::FilterType::Lanczos3,
+        );
+        let analyzer = smartcrop::Analyzer::new(smartcrop::CropSettings::default());
+        let crop = analyzer
+            .find_best_crop(
+                &resized,
+                std::num::NonZeroU32::new(target_width).unwrap(),
+                std::num::NonZeroU32::new(target_height).unwrap(),
+            )
+            .unwrap()
+            .crop;
+
+        let cropped =
+            image::imageops::crop(&mut resized, crop.x, crop.y, crop.width, crop.height).to_image();
+        cropped.save(format!("v_{}_{}", id, "resized_cropped.png"))?;
+        // let cropped = image::open("output_resized_cropped.png")?.to_rgba();
+
+        let dithered =
+            apply_error_diffusion(cropped.clone(), floyd_steinberg(), palette_8_grayscale());
+        dithered.save(format!("v_{}_{}", id, "dithered_grayscale.png"))?;
+
+        let dithered =
+            apply_error_diffusion(cropped.clone(), jarvis_judice_ninke(), palette_7_acep());
+        dithered.save(format!("v_{}_{}", id, "dithered_acep.png"))?;
+        // let carved = seamcarving::resize(&resized, target_width, target_height);
+        // carved.save("output_carved.png")?;
     }
-
-    let mut file = std::fs::File::create("output.jpg")?;
-    file.write_all(&dst)?;
-    drop(file);
-
-    let image = image::load_from_memory(&dst)?;
-    let (width, height) = image.dimensions();
-    let target_width = 600u32;
-    let target_height = 448u32;
-
-    let (new_width, new_height) = get_cover_dimensions(width, height, target_width, target_height);
-    let mut resized = image::imageops::resize(
-        &image,
-        new_width,
-        new_height,
-        image::imageops::FilterType::Lanczos3,
-    );
-    let analyzer = smartcrop::Analyzer::new(smartcrop::CropSettings::default());
-    let crop = analyzer
-        .find_best_crop(
-            &resized,
-            std::num::NonZeroU32::new(target_width).unwrap(),
-            std::num::NonZeroU32::new(target_height).unwrap(),
-        )
-        .unwrap()
-        .crop;
-
-    let cropped = image::imageops::crop(&mut resized, crop.x, crop.y, crop.width, crop.height).to_image();
-    cropped.save("output_resized_cropped.png")?;
-
-    let dithered = quantize_to_3bit(&image::DynamicImage::ImageRgba8(cropped), floyd_steinberg());
-    dithered.save("output_dithered_grayscale.png")?;
-    // let carved = seamcarving::resize(&resized, target_width, target_height);
-    // carved.save("output_carved.png")?;
 
     Ok(())
 }
