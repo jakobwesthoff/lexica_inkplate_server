@@ -1,4 +1,5 @@
-FROM rust:1.64.0-buster as builder
+ARG ARCH=
+FROM ${ARCH}rust:1.64.0-buster as builder
 
 # Trick to cache all used dependencies
 RUN USER=root cargo new --bin lexica_inkplate_server
@@ -12,7 +13,7 @@ ADD . ./
 RUN rm ./target/release/deps/lexica_inkplate_server*
 RUN cargo build --release
 
-FROM debian:buster-slim
+FROM ${ARCH}debian:buster-slim
 ARG APP=/app
 
 RUN apt-get update \
