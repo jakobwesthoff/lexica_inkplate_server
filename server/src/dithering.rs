@@ -182,32 +182,18 @@ pub fn apply_error_diffusion(
     dither: Dithering,
     palette: Vec<u32>,
 ) -> ImageBuffer<image::Rgba<u8>, Vec<u8>> {
+
     for y in 0..image.height() {
         for x in 0..image.width() {
-            // // Original pixel
-            // let r = img.data[idx];
-            // let g = img.data[idx + 1];
-            // let b = img.data[idx + 2];
-
             let original_pixel = get_pixel(&image, x, y);
 
-            // // Quantized pixel
-            // let nearestPaletteIndex = mapColorToPalette(bytesToColor(r, g, b), palette);
-            // const [qr, qg, qb] = colorToBytes(palette[nearestPaletteIndex]);
-
+            // Quantized pixel
             let nearest_palette_index = map_color_to_palette_index(original_pixel, &palette);
 
-            // img.data[idx] = qr;
-            // img.data[idx + 1] = qg;
-            // img.data[idx + 2] = qb;
-            // img.indexed[toIndex(img, x, y, 1)] = nearestPaletteIndex;
             let new_pixel = palette[nearest_palette_index];
             set_pixel(&mut image, x, y, new_pixel);
 
-            // // Quantization error
-            // let er = r - qr;
-            // let eg = g - qg;
-            // let eb = b - qb;
+            // Quantization error
             let er: i16 = (original_pixel >> 16 & 0xff) as i16 - (new_pixel >> 16 & 0xff) as i16;
             let eg: i16 = (original_pixel >> 8 & 0xff) as i16 - (new_pixel >> 8 & 0xff) as i16;
             let eb: i16 = (original_pixel >> 0 & 0xff) as i16 - (new_pixel >> 0 & 0xff) as i16;
@@ -221,16 +207,10 @@ pub fn apply_error_diffusion(
                     let ky = i64::from(y) + dy;
 
                     if kernel_value != 0 && is_inside_image(&image, kx, ky) {
-                        // // Original not yet diffused pixel
-                        // let r = img.data[idx];
-                        // let g = img.data[idx + 1];
-                        // let b = img.data[idx + 2];
+                        // Original not yet diffused pixel
                         let original = get_pixel(&image, kx as u32, ky as u32);
 
-                        // // Pixel with propagated error
-                        // let dr = clampPixel(r + Math.floor((er * matrixValue) / normalization));
-                        // let dg = clampPixel(g + Math.floor((eg * matrixValue) / normalization));
-                        // let db = clampPixel(b + Math.floor((eb * matrixValue) / normalization));
+                        // Pixel with propagated error
                         let dr = clamp(
                             (original >> 16 & 0xff) as i64
                                 + (er as i64 * kernel_value as i64 / dither.normalization as i64),
@@ -263,11 +243,3 @@ pub fn apply_error_diffusion(
     }
     image
 }
-
-// pub fn quantize_to_3bit(
-//     image: &DynamicImage,
-//     dithering: Dithering,
-// ) -> ImageBuffer<Luma<u8>, Vec<u8>> {
-//     let grayscale = image.grayscale().to_luma();
-//     apply_error_diffusion(grayscale, dithering)
-// }

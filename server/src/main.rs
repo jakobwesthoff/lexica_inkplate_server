@@ -1,21 +1,19 @@
 mod dithering;
-
-use std::io::Write;
+mod image_data;
 
 use image::GenericImage;
-// use image::GenericImageView;
 use rand::Rng;
 
-use crate::dithering::{
-    apply_error_diffusion, floyd_steinberg, jarvis_judice_ninke, palette_7_acep,
-    palette_8_grayscale, Dithering,
-};
+use rocket::http::ContentType;
 
-fn create_fake_headers() -> anyhow::Result<curl::easy::List> {
+fn create_fake_headers(accept: &str) -> anyhow::Result<curl::easy::List> {
     let mut headers: curl::easy::List = curl::easy::List::new();
     headers.append("User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:105.0) Gecko/20100101 Firefox/105.0")?;
+    headers.append(format!("Accept: {}", accept).as_str())?;
     headers.append("Accept-Language: en-US,en;q=0.5")?;
+    headers.append("Accept-Encoding: identity")?;
     headers.append("DNT: 1")?;
+    headers.append("Connection: keep-alive")?;
     headers.append("Upgrade-Insecure-Requests: 1")?;
     headers.append("Sec-Fetch-Dest: document")?;
     headers.append("Sec-Fetch-Mode: navigate")?;
@@ -25,7 +23,7 @@ fn create_fake_headers() -> anyhow::Result<curl::easy::List> {
     headers.append("TE: trailers")?;
     Ok(headers)
 }
-fn main() -> anyhow::Result<()> {
+fn fetch_lexica() -> anyhow::Result<image::DynamicImage> {
     // Tried this with request. However then it is detected as "non browser" and
     // terminates in the cloudflare captcha.
     // With curl we do not have this problem however. No real idea why. However I don't really bother ;)
@@ -33,8 +31,7 @@ fn main() -> anyhow::Result<()> {
     // on my system.
     let mut easy = curl::easy::Easy::new();
     easy.url("https://lexica.art")?;
-    let mut headers = create_fake_headers()?;
-    headers.append("Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")?;
+    let headers = create_fake_headers("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")?;
     easy.http_headers(headers)?;
 
     let mut dst = Vec::new();
@@ -64,80 +61,83 @@ fn main() -> anyhow::Result<()> {
         .unwrap();
 
     let mut rng = rand::thread_rng();
-    for prompt_index in rand::seq::index::sample(&mut rng, prompts.len(), 32) {
-        // let prompt_index = rng.gen_range(0..prompts.len());
-        let prompt = &prompts[prompt_index];
-        let images = prompt["images"].as_array().unwrap();
-        let image_index = rng.gen_range(0..images.len());
-        let image = &images[image_index];
+    let prompt_index = rng.gen_range(0..prompts.len());
+    let prompt = &prompts[prompt_index];
+    let images = prompt["images"].as_array().unwrap();
+    let image_index = rng.gen_range(0..images.len());
+    let image = &images[image_index];
 
-        let id = image["id"].as_str().unwrap();
+    let id = image["id"].as_str().unwrap();
 
-        let image_url = format!("https://image.lexica.art/md/{}", id);
-        println!("{}", image_url);
+    let image_url = format!("https://image.lexica.art/md/{}", id);
+    println!("{}", image_url);
 
-        let mut easy = curl::easy::Easy::new();
-        easy.url(image_url.as_str())?;
+    let mut easy = curl::easy::Easy::new();
+    easy.url(image_url.as_str())?;
 
-        let mut headers = create_fake_headers()?;
-        headers.append("Accept: image/jpeg,*/*")?;
-        easy.http_headers(headers)?;
+    let headers = create_fake_headers("image/jpeg,*/*")?;
+    easy.http_headers(headers)?;
 
-        let mut dst = Vec::new();
-        {
-            let mut transfer = easy.transfer();
-            transfer.write_function(|data| {
-                dst.extend_from_slice(data);
-                Ok(data.len())
-            })?;
-            transfer.perform()?;
-        }
-
-        let mut file = std::fs::File::create(format!("v_{}_{}", id, "output.jpg"))?;
-        file.write_all(&dst)?;
-        drop(file);
-
-        let image = image::load_from_memory(&dst)?;
-        let (width, height) = image.dimensions();
-        let target_width = 448u32;
-        let target_height = 600u32;
-
-        let (new_width, new_height) =
-            get_cover_dimensions(width, height, target_width, target_height);
-
-        let mut resized = image::imageops::resize(
-            &image,
-            new_width,
-            new_height,
-            image::imageops::FilterType::Lanczos3,
-        );
-        let analyzer = smartcrop::Analyzer::new(smartcrop::CropSettings::default());
-        let crop = analyzer
-            .find_best_crop(
-                &resized,
-                std::num::NonZeroU32::new(target_width).unwrap(),
-                std::num::NonZeroU32::new(target_height).unwrap(),
-            )
-            .unwrap()
-            .crop;
-
-        let cropped =
-            image::imageops::crop(&mut resized, crop.x, crop.y, crop.width, crop.height).to_image();
-        cropped.save(format!("v_{}_{}", id, "resized_cropped.png"))?;
-        // let cropped = image::open("output_resized_cropped.png")?.to_rgba();
-
-        let dithered =
-            apply_error_diffusion(cropped.clone(), floyd_steinberg(), palette_8_grayscale());
-        dithered.save(format!("v_{}_{}", id, "dithered_grayscale.png"))?;
-
-        let dithered =
-            apply_error_diffusion(cropped.clone(), jarvis_judice_ninke(), palette_7_acep());
-        dithered.save(format!("v_{}_{}", id, "dithered_acep.png"))?;
-        // let carved = seamcarving::resize(&resized, target_width, target_height);
-        // carved.save("output_carved.png")?;
+    let mut dst = Vec::new();
+    {
+        let mut transfer = easy.transfer();
+        transfer.write_function(|data| {
+            dst.extend_from_slice(data);
+            Ok(data.len())
+        })?;
+        transfer.perform()?;
     }
 
-    Ok(())
+    // let mut file = std::fs::File::create(format!("v_{}_{}", id, "output.jpg"))?;
+    // file.write_all(&dst)?;
+    // drop(file);
+
+    let image = image::load_from_memory(&dst)?;
+    let (width, height) = image.dimensions();
+    let target_width = 448u32;
+    let target_height = 600u32;
+
+    let (new_width, new_height) = get_cover_dimensions(width, height, target_width, target_height);
+
+    let mut resized = image::imageops::resize(
+        &image,
+        new_width,
+        new_height,
+        image::imageops::FilterType::Lanczos3,
+    );
+    let analyzer = smartcrop::Analyzer::new(smartcrop::CropSettings::default());
+    let crop = analyzer
+        .find_best_crop(
+            &resized,
+            std::num::NonZeroU32::new(target_width).unwrap(),
+            std::num::NonZeroU32::new(target_height).unwrap(),
+        )
+        .unwrap()
+        .crop;
+
+    // println!("crop: {:?}", crop);
+
+    let cropped = image::imageops::crop(
+        &mut resized,
+        crop.x,
+        crop.y,
+        crop.width.clamp(0, target_width),
+        crop.height.clamp(0, target_height),
+    )
+    .to_image();
+    // cropped.save(format!("v_{}_{}", id, "resized_cropped.png"))?;
+    // let cropped = image::open("output_resized_cropped.png")?.to_rgba();
+
+    // let dithered = apply_error_diffusion(cropped.clone(), floyd_steinberg(), palette_8_grayscale());
+    // dithered.save(format!("v_{}_{}", id, "dithered_grayscale.png"))?;
+
+    // let dithered = apply_error_diffusion(cropped.clone(), jarvis_judice_ninke(), palette_7_acep());
+    // dithered.save(format!("v_{}_{}", id, "dithered_acep.png"))?;
+    // let carved = seamcarving::resize(&resized, target_width, target_height);
+    // carved.save("output_carved.png")?;
+    let rotated = image::imageops::rotate90(&cropped);
+
+    Ok(image::DynamicImage::ImageRgba8(rotated))
 }
 
 fn get_cover_dimensions(
@@ -159,4 +159,33 @@ fn get_cover_dimensions(
         let new_width = (new_height as f64 * aspect_ratio).round() as u32;
         return (new_width, new_height);
     }
+}
+
+#[rocket::get("/lexica/png/original")]
+async fn lexica_png_original() -> Option<(ContentType, Vec<u8>)> {
+    return Some((ContentType::PNG, image_data::png(&fetch_lexica().unwrap())));
+}
+
+#[rocket::get("/lexica/png/dithered")]
+async fn lexica_png_dithered() -> Option<(ContentType, Vec<u8>)> {
+    return Some((
+        ContentType::PNG,
+        image_data::png_dithered(&fetch_lexica().unwrap()),
+    ));
+}
+
+#[rocket::get("/lexica/inkplate")]
+async fn lexica_inkplate() -> Option<Vec<u8>> {
+    return Some(image_data::inkplate_raw(&fetch_lexica().unwrap()));
+}
+#[tokio::main]
+async fn main() {
+    rocket::build()
+        .mount(
+            "/",
+            rocket::routes![lexica_png_original, lexica_png_dithered, lexica_inkplate],
+        )
+        .launch()
+        .await
+        .unwrap();
 }
