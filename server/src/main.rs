@@ -162,7 +162,7 @@ fn create_posterity_db(connection: &Connection) {
 
     connection
         .execute(
-            "CREATE TABLE TABLE IF NOT EXISTS lexica_prompt (
+            "CREATE TABLE IF NOT EXISTS lexica_prompt (
         id TEXT PRIMARY KEY,
         prompt TEXT NOT NULL,
         raw_document TEXT NOT NULL,
@@ -198,9 +198,6 @@ fn give_image_to_posterity(
         .unwrap()
         .as_secs();
 
-    let mut raw_prompt_without_images = lexica_image.prompt.clone();
-    raw_prompt_without_images["images"].take();
-
     connection
         .execute(
             "
@@ -212,7 +209,7 @@ fn give_image_to_posterity(
             params![
                 prompt_id,
                 &lexica_image.prompt["prompt"].as_str().unwrap(),
-                serde_json::to_string(&raw_prompt_without_images).unwrap(),
+                serde_json::to_string(&lexica_image.prompt).unwrap(),
                 now
             ],
         )
