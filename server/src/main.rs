@@ -149,7 +149,7 @@ impl Deref for DbConn {
 fn create_posterity_db(connection: &Connection) {
     connection
         .execute(
-            "CREATE TABLE lexica_image (
+            "CREATE TABLE IF NOT EXISTS lexica_image (
         id TEXT PRIMARY KEY,
         prompt TEXT NOT NULL,
         raw_document TEXT NOT NULL,
@@ -162,7 +162,7 @@ fn create_posterity_db(connection: &Connection) {
 
     connection
         .execute(
-            "CREATE TABLE lexica_prompt (
+            "CREATE TABLE TABLE IF NOT EXISTS lexica_prompt (
         id TEXT PRIMARY KEY,
         prompt TEXT NOT NULL,
         raw_document TEXT NOT NULL,
@@ -174,7 +174,7 @@ fn create_posterity_db(connection: &Connection) {
 
     connection
         .execute(
-            "CREATE TABLE posterity (
+            "CREATE TABLE IF NOT EXISTS posterity (
         id INTEGER PRIMARY KEY,
         lexica_image TEXT NOT NULL,
         cropped_image BLOB NOT NULL,
@@ -260,14 +260,10 @@ impl<'r> FromRequest<'r> for DbConn {
 
     async fn from_request(request: &'r Request<'_>) -> Outcome<DbConn, Self::Error> {
         let db_file = request.guard::<&State<DbFile>>().await.unwrap();
-        let db_creation = !Path::new(db_file.as_str()).exists();
 
         match Connection::open(db_file.as_str()) {
             Ok(connection) => {
-                if db_creation {
-                    create_posterity_db(&connection);
-                }
-
+                create_posterity_db(&connection);
                 Outcome::Success(DbConn(connection))
             }
             Err(_) => Outcome::Failure((Status::ServiceUnavailable, ())),
