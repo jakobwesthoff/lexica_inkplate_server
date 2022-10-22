@@ -1,15 +1,21 @@
 mod dithering;
 mod image_data;
 
+use std::ops::Deref;
+use std::path::Path;
+use std::time::SystemTime;
+
 use figment::providers::Env;
 use figment::Figment;
-use image::GenericImage;
 use rand::Rng;
 
-use rocket::http::ContentType;
-use rocket::State;
+use rocket::http::{ContentType, Status};
+use rocket::request::{FromRequest, Outcome};
 use rocket::serde::json::Json;
+use rocket::{Request, State};
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
 struct AppConfig {
@@ -33,7 +39,15 @@ fn create_fake_headers(accept: &str) -> anyhow::Result<curl::easy::List> {
     headers.append("TE: trailers")?;
     Ok(headers)
 }
-fn fetch_lexica() -> anyhow::Result<image::DynamicImage> {
+
+struct LexicaImage {
+    pub id: String,
+    pub prompt: Value,
+    pub metadata: Value,
+    pub image: image::DynamicImage,
+}
+
+fn fetch_lexica() -> anyhow::Result<LexicaImage> {
     // Tried this with request. However then it is detected as "non browser" and
     // terminates in the cloudflare captcha.
     // With curl we do not have this problem however. No real idea why. However I don't really bother ;)
@@ -77,9 +91,9 @@ fn fetch_lexica() -> anyhow::Result<image::DynamicImage> {
     let prompt = &prompts[prompt_index];
     let images = prompt["images"].as_array().unwrap();
     let image_index = rng.gen_range(0..images.len());
-    let image = &images[image_index];
+    let image_metadata = &images[image_index];
 
-    let id = image["id"].as_str().unwrap();
+    let id = image_metadata["id"].as_str().unwrap();
 
     let image_url = format!("https://image.lexica.art/md/{}", id);
     println!("{}", image_url);
@@ -105,90 +119,202 @@ fn fetch_lexica() -> anyhow::Result<image::DynamicImage> {
     // drop(file);
 
     let image = image::load_from_memory(&dst)?;
-    let (width, height) = image.dimensions();
-    let target_width = 448u32;
-    let target_height = 600u32;
 
-    let (new_width, new_height) = get_cover_dimensions(width, height, target_width, target_height);
-
-    let mut resized = image::imageops::resize(
-        &image,
-        new_width,
-        new_height,
-        image::imageops::FilterType::Lanczos3,
-    );
-    let analyzer = smartcrop::Analyzer::new(smartcrop::CropSettings::default());
-    let crop = analyzer
-        .find_best_crop(
-            &resized,
-            std::num::NonZeroU32::new(target_width).unwrap(),
-            std::num::NonZeroU32::new(target_height).unwrap(),
-        )
-        .unwrap()
-        .crop;
-
-    // println!("crop: {:?}", crop);
-
-    let cropped = image::imageops::crop(
-        &mut resized,
-        crop.x,
-        crop.y,
-        crop.width.clamp(0, target_width),
-        crop.height.clamp(0, target_height),
-    )
-    .to_image();
-    // cropped.save(format!("v_{}_{}", id, "resized_cropped.png"))?;
-    // let cropped = image::open("output_resized_cropped.png")?.to_rgba();
-
-    // let dithered = apply_error_diffusion(cropped.clone(), floyd_steinberg(), palette_8_grayscale());
-    // dithered.save(format!("v_{}_{}", id, "dithered_grayscale.png"))?;
-
-    // let dithered = apply_error_diffusion(cropped.clone(), jarvis_judice_ninke(), palette_7_acep());
-    // dithered.save(format!("v_{}_{}", id, "dithered_acep.png"))?;
-    // let carved = seamcarving::resize(&resized, target_width, target_height);
-    // carved.save("output_carved.png")?;
-    let rotated = image::imageops::rotate90(&cropped);
-
-    Ok(image::DynamicImage::ImageRgba8(rotated))
+    Ok(LexicaImage {
+        id: String::from(id),
+        prompt: prompt.to_owned(),
+        metadata: image_metadata.to_owned(),
+        image,
+    })
 }
 
-fn get_cover_dimensions(
-    width: u32,
-    height: u32,
-    target_width: u32,
-    target_height: u32,
-) -> (u32, u32) {
-    let aspect_ratio: f64 = width as f64 / height as f64;
-    let target_aspect_ratio = target_width as f64 / target_height as f64;
+struct DbFile(pub String);
+impl Deref for DbFile {
+    type Target = String;
 
-    if aspect_ratio < target_aspect_ratio {
-        // scale to width and cut height
-        let new_width = target_width;
-        let new_height = (new_width as f64 / aspect_ratio).round() as u32;
-        return (new_width, new_height);
-    } else {
-        let new_height = target_height;
-        let new_width = (new_height as f64 * aspect_ratio).round() as u32;
-        return (new_width, new_height);
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+struct DbConn(pub rusqlite::Connection);
+
+impl Deref for DbConn {
+    type Target = Connection;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
-#[rocket::get("/lexica/png/original")]
-async fn lexica_png_original() -> Option<(ContentType, Vec<u8>)> {
-    return Some((ContentType::PNG, image_data::png(&fetch_lexica().unwrap())));
+fn create_history_db(connection: &Connection) {
+    connection
+        .execute(
+            "CREATE TABLE lexica_image (
+        id TEXT PRIMARY KEY,
+        prompt TEXT NOT NULL,
+        raw_document TEXT NOT NULL,
+        image BLOB NOT NULL,
+        stored_at INTEGER
+    )",
+            [],
+        )
+        .unwrap();
+
+    connection
+        .execute(
+            "CREATE TABLE lexica_prompt (
+        id TEXT PRIMARY KEY,
+        prompt TEXT NOT NULL,
+        raw_document TEXT NOT NULL,
+        stored_at INTEGER
+    )",
+            [],
+        )
+        .unwrap();
+
+    connection
+        .execute(
+            "CREATE TABLE history (
+        id INTEGER PRIMARY KEY,
+        lexica_image TEXT NOT NULL,
+        cropped_image BLOB NOT NULL,
+        dithered_image BLOB NOT NULL,
+        shown_at INTEGER
+    )",
+            [],
+        )
+        .unwrap();
+}
+
+fn give_image_to_prosperity(
+    connection: DbConn,
+    lexica_image: &LexicaImage,
+    processed_image: &ProcessedImage,
+) {
+    let image_id = &lexica_image.id;
+    let prompt_id = lexica_image.prompt["id"].as_str().unwrap();
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    connection
+        .execute(
+            "
+            INSERT OR IGNORE INTO lexica_prompt
+                (id, prompt, raw_document, stored_at)
+            VALUES
+                (?1, ?2, ?3, ?4)
+            ",
+            params![
+                prompt_id,
+                &lexica_image.prompt["prompt"].as_str().unwrap(),
+                serde_json::to_string(&lexica_image.prompt["metadata"]).unwrap(),
+                now
+            ],
+        )
+        .unwrap();
+
+    connection
+        .execute(
+            "
+            INSERT OR IGNORE INTO lexica_image
+                (id, prompt, raw_document, image, stored_at)
+            VALUES
+                (?1, ?2, ?3, ?4, ?5)
+            ",
+            params![
+                image_id,
+                prompt_id,
+                serde_json::to_string(&lexica_image.metadata).unwrap(),
+                image_data::png(&lexica_image.image),
+                now
+            ],
+        )
+        .unwrap();
+
+    connection
+        .execute(
+            "
+            INSERT INTO history
+                (lexica_image, cropped_image, dithered_image, shown_at)
+            VALUES
+                (?1, ?2, ?3, ?4)
+            ",
+            params![
+                image_id,
+                processed_image.cropped,
+                processed_image.dithered,
+                now
+            ],
+        )
+        .unwrap();
+}
+
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for DbConn {
+    type Error = ();
+
+    async fn from_request(request: &'r Request<'_>) -> Outcome<DbConn, Self::Error> {
+        let db_file = request.guard::<&State<DbFile>>().await.unwrap();
+        let db_creation = !Path::new(db_file.as_str()).exists();
+
+        match Connection::open(db_file.as_str()) {
+            Ok(connection) => {
+                if db_creation {
+                    create_history_db(&connection);
+                }
+
+                Outcome::Success(DbConn(connection))
+            }
+            Err(_) => Outcome::Failure((Status::ServiceUnavailable, ())),
+        }
+    }
+}
+
+struct ProcessedImage {
+    pub cropped: Vec<u8>,
+    pub dithered: Vec<u8>,
+    pub rotated: Vec<u8>,
+    pub inkplate: Vec<u8>,
+}
+
+fn process_lexica_image(lexica_image: &LexicaImage) -> ProcessedImage {
+    let cropped = image_data::scale_and_crop_image(&lexica_image.image);
+    let dithered = image_data::image_dithered(&cropped);
+    let rotated = image_data::rotate_image(&dithered);
+    let inkplate = image_data::inkplate_raw(&rotated);
+
+    ProcessedImage {
+        cropped: image_data::png(&cropped),
+        dithered: image_data::png(&dithered),
+        rotated: image_data::png(&rotated),
+        inkplate,
+    }
+}
+
+#[rocket::get("/lexica/png/cropped")]
+async fn lexica_png_original(connection: DbConn) -> Option<(ContentType, Vec<u8>)> {
+    let lexica = fetch_lexica().unwrap();
+    let processed_image = process_lexica_image(&lexica);
+    give_image_to_prosperity(connection, &lexica, &processed_image);
+    return Some((ContentType::PNG, processed_image.cropped));
 }
 
 #[rocket::get("/lexica/png/dithered")]
-async fn lexica_png_dithered() -> Option<(ContentType, Vec<u8>)> {
-    return Some((
-        ContentType::PNG,
-        image_data::png_dithered(&fetch_lexica().unwrap()),
-    ));
+async fn lexica_png_dithered(connection: DbConn) -> Option<(ContentType, Vec<u8>)> {
+    let lexica = fetch_lexica().unwrap();
+    let processed_image = process_lexica_image(&lexica);
+    give_image_to_prosperity(connection, &lexica, &processed_image);
+    return Some((ContentType::PNG, processed_image.dithered));
 }
 
 #[rocket::get("/lexica/inkplate")]
-async fn lexica_inkplate() -> Option<Vec<u8>> {
-    return Some(image_data::inkplate_raw(&fetch_lexica().unwrap()));
+async fn lexica_inkplate(connection: DbConn) -> Option<Vec<u8>> {
+    let lexica = fetch_lexica().unwrap();
+    let processed_image = process_lexica_image(&lexica);
+    give_image_to_prosperity(connection, &lexica, &processed_image);
+    return Some(processed_image.inkplate);
 }
 
 /*
@@ -208,13 +334,14 @@ async fn main() -> anyhow::Result<()> {
 
     rocket::build()
         .manage(config)
+        .manage(DbFile(db_file))
         .mount(
             "/",
             rocket::routes![
                 lexica_png_original,
                 lexica_png_dithered,
                 lexica_inkplate,
-                get_config
+                get_config,
             ],
         )
         .launch()

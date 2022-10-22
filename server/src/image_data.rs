@@ -1,6 +1,79 @@
-use image::DynamicImage;
+use image::{DynamicImage, GenericImage};
 
 use crate::dithering;
+
+fn get_cover_dimensions(
+    width: u32,
+    height: u32,
+    target_width: u32,
+    target_height: u32,
+) -> (u32, u32) {
+    let aspect_ratio: f64 = width as f64 / height as f64;
+    let target_aspect_ratio = target_width as f64 / target_height as f64;
+
+    if aspect_ratio < target_aspect_ratio {
+        // scale to width and cut height
+        let new_width = target_width;
+        let new_height = (new_width as f64 / aspect_ratio).round() as u32;
+        return (new_width, new_height);
+    } else {
+        let new_height = target_height;
+        let new_width = (new_height as f64 * aspect_ratio).round() as u32;
+        return (new_width, new_height);
+    }
+}
+
+pub fn scale_and_crop_image(image: &image::DynamicImage) -> image::DynamicImage {
+    let (width, height) = image.dimensions();
+    let target_width = 448u32;
+    let target_height = 600u32;
+
+    let (new_width, new_height) = get_cover_dimensions(width, height, target_width, target_height);
+
+    let mut resized = image::imageops::resize(
+        image,
+        new_width,
+        new_height,
+        image::imageops::FilterType::Lanczos3,
+    );
+    let analyzer = smartcrop::Analyzer::new(smartcrop::CropSettings::default());
+    let crop = analyzer
+        .find_best_crop(
+            &resized,
+            std::num::NonZeroU32::new(target_width).unwrap(),
+            std::num::NonZeroU32::new(target_height).unwrap(),
+        )
+        .unwrap()
+        .crop;
+
+    // println!("crop: {:?}", crop);
+
+    let cropped = image::imageops::crop(
+        &mut resized,
+        crop.x,
+        crop.y,
+        crop.width.clamp(0, target_width),
+        crop.height.clamp(0, target_height),
+    )
+    .to_image();
+    // cropped.save(format!("v_{}_{}", id, "resized_cropped.png"))?;
+    // let cropped = image::open("output_resized_cropped.png")?.to_rgba();
+
+    // let dithered = apply_error_diffusion(cropped.clone(), floyd_steinberg(), palette_8_grayscale());
+    // dithered.save(format!("v_{}_{}", id, "dithered_grayscale.png"))?;
+
+    // let dithered = apply_error_diffusion(cropped.clone(), jarvis_judice_ninke(), palette_7_acep());
+    // dithered.save(format!("v_{}_{}", id, "dithered_acep.png"))?;
+    // let carved = seamcarving::resize(&resized, target_width, target_height);
+    // carved.save("output_carved.png")?;
+
+    image::DynamicImage::ImageRgba8(cropped)
+}
+
+pub fn rotate_image(image: &image::DynamicImage) -> image::DynamicImage {
+    let rotated = image::imageops::rotate90(image);
+    image::DynamicImage::ImageRgba8(rotated)
+}
 
 pub fn png(image: &DynamicImage) -> Vec<u8> {
     let mut out_bytes: Vec<u8> = Vec::new();
@@ -11,7 +84,7 @@ pub fn png(image: &DynamicImage) -> Vec<u8> {
     out_bytes
 }
 
-pub fn png_dithered(image: &DynamicImage) -> Vec<u8> {
+pub fn image_dithered(image: &DynamicImage) -> DynamicImage {
     let mut out_bytes: Vec<u8> = Vec::new();
 
     let dithered = dithering::apply_error_diffusion(
@@ -21,10 +94,6 @@ pub fn png_dithered(image: &DynamicImage) -> Vec<u8> {
     );
 
     DynamicImage::ImageRgba8(dithered)
-        .write_to(&mut out_bytes, image::ImageOutputFormat::PNG)
-        .unwrap();
-
-    out_bytes
 }
 
 #[inline(always)]
@@ -32,14 +101,12 @@ fn is_odd(value: u32) -> bool {
     value & 0x1 == 0x1
 }
 
-pub fn inkplate_raw(image: &DynamicImage) -> Vec<u8> {
-    let dithered = dithering::apply_error_diffusion(
-        image.to_rgba().clone(),
-        dithering::jarvis_judice_ninke(),
-        dithering::palette_7_acep(),
-    );
+// Input must be dithered
+pub fn inkplate_raw(dithered_image: &DynamicImage) -> Vec<u8> {
+    let dithered = dithered_image.as_rgba8().unwrap();
+
     let (width, height) = dithered.dimensions();
-    println!("dithered dimensions: {}x{}", width, height);
+    // println!("dithered dimensions: {}x{}", width, height);
 
     // Minimize possible reallocations
     let mut out_bytes: Vec<u8> = Vec::with_capacity((width * height / 2) as usize);
