@@ -42,6 +42,7 @@ fn create_fake_headers(accept: &str) -> anyhow::Result<curl::easy::List> {
 
 struct LexicaImage {
     pub id: String,
+    pub url: String,
     pub prompt: Value,
     pub metadata: Value,
     pub image: image::DynamicImage,
@@ -96,7 +97,7 @@ fn fetch_lexica() -> anyhow::Result<LexicaImage> {
     let id = image_metadata["id"].as_str().unwrap();
 
     let image_url = format!("https://image.lexica.art/md/{}", id);
-    println!("{}", image_url);
+    // println!("{}", image_url);
 
     let mut easy = curl::easy::Easy::new();
     easy.url(image_url.as_str())?;
@@ -122,6 +123,7 @@ fn fetch_lexica() -> anyhow::Result<LexicaImage> {
 
     Ok(LexicaImage {
         id: String::from(id),
+        url: image_url,
         prompt: prompt.to_owned(),
         metadata: image_metadata.to_owned(),
         image,
@@ -152,6 +154,7 @@ fn create_posterity_db(connection: &Connection) {
             "CREATE TABLE IF NOT EXISTS lexica_image (
         id TEXT PRIMARY KEY,
         prompt TEXT NOT NULL,
+        url TEXT NOT NULL,
         raw_document TEXT NOT NULL,
         image BLOB NOT NULL,
         stored_at INTEGER
@@ -219,13 +222,14 @@ fn give_image_to_posterity(
         .execute(
             "
             INSERT OR IGNORE INTO lexica_image
-                (id, prompt, raw_document, image, stored_at)
+                (id, prompt, url, raw_document, image, stored_at)
             VALUES
-                (?1, ?2, ?3, ?4, ?5)
+                (?1, ?2, ?3, ?4, ?5, ?6)
             ",
             params![
                 image_id,
                 prompt_id,
+                lexica_image.url,
                 serde_json::to_string(&lexica_image.metadata).unwrap(),
                 image_data::optimized_png(&image_data::png(&lexica_image.image)),
                 now
