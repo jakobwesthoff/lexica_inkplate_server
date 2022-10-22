@@ -10,7 +10,7 @@ anyhow = "1.0.65"
 # curl = { version = "0.4.44", default_features = false, features = ["ssl", "static-ssl"] }
 curl = { version = "0.4.44" }
 image = { version = "0.19" }
-smartcrop = {git = "https://github.com/bekh6ex/smartcrop.rs.git" }
+smartcrop = { git = "https://github.com/bekh6ex/smartcrop.rs.git" }
 rand = "0.8.5"
 scraper = "0.13.0"
 serde_json = "1.0.85"
@@ -20,6 +20,17 @@ rocket = { version = "0.5.0-rc.2", features = ["json"] }
 rusqlite = { version = "0.28.0", features = ["bundled"] }
 figment = { version = "0.10.8", features = ["env"] }
 serde = { version = "1.0.147", features = ["derive"] }
+oxipng = { version = "6.0.1", default-features = false, features = [
+  "binary",
+  "clap",
+  "filetime",
+  "libdeflater",
+  "parallel",
+  "rayon",
+  "wild",
+  "zopfli",
+] }
+flexi_logger = "0.24.0"
 # seamcarving = "0.2.3"
 
 # [profile.release]

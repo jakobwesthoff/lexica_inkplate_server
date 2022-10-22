@@ -146,7 +146,7 @@ impl Deref for DbConn {
     }
 }
 
-fn create_history_db(connection: &Connection) {
+fn create_posterity_db(connection: &Connection) {
     connection
         .execute(
             "CREATE TABLE lexica_image (
@@ -174,7 +174,7 @@ fn create_history_db(connection: &Connection) {
 
     connection
         .execute(
-            "CREATE TABLE history (
+            "CREATE TABLE posterity (
         id INTEGER PRIMARY KEY,
         lexica_image TEXT NOT NULL,
         cropped_image BLOB NOT NULL,
@@ -186,7 +186,7 @@ fn create_history_db(connection: &Connection) {
         .unwrap();
 }
 
-fn give_image_to_prosperity(
+fn give_image_to_posterity(
     connection: DbConn,
     lexica_image: &LexicaImage,
     processed_image: &ProcessedImage,
@@ -227,7 +227,7 @@ fn give_image_to_prosperity(
                 image_id,
                 prompt_id,
                 serde_json::to_string(&lexica_image.metadata).unwrap(),
-                image_data::png(&lexica_image.image),
+                image_data::optimized_png(&image_data::png(&lexica_image.image)),
                 now
             ],
         )
@@ -236,7 +236,7 @@ fn give_image_to_prosperity(
     connection
         .execute(
             "
-            INSERT INTO history
+            INSERT INTO posterity
                 (lexica_image, cropped_image, dithered_image, shown_at)
             VALUES
                 (?1, ?2, ?3, ?4)
@@ -262,7 +262,7 @@ impl<'r> FromRequest<'r> for DbConn {
         match Connection::open(db_file.as_str()) {
             Ok(connection) => {
                 if db_creation {
-                    create_history_db(&connection);
+                    create_posterity_db(&connection);
                 }
 
                 Outcome::Success(DbConn(connection))
@@ -286,9 +286,9 @@ fn process_lexica_image(lexica_image: &LexicaImage) -> ProcessedImage {
     let inkplate = image_data::inkplate_raw(&rotated);
 
     ProcessedImage {
-        cropped: image_data::png(&cropped),
-        dithered: image_data::png(&dithered),
-        rotated: image_data::png(&rotated),
+        cropped: image_data::optimized_png(&image_data::png(&cropped)),
+        dithered: image_data::optimized_png(&image_data::png(&dithered)),
+        rotated: image_data::optimized_png(&image_data::png(&rotated)),
         inkplate,
     }
 }
@@ -297,7 +297,7 @@ fn process_lexica_image(lexica_image: &LexicaImage) -> ProcessedImage {
 async fn lexica_png_original(connection: DbConn) -> Option<(ContentType, Vec<u8>)> {
     let lexica = fetch_lexica().unwrap();
     let processed_image = process_lexica_image(&lexica);
-    give_image_to_prosperity(connection, &lexica, &processed_image);
+    give_image_to_posterity(connection, &lexica, &processed_image);
     return Some((ContentType::PNG, processed_image.cropped));
 }
 
@@ -305,7 +305,7 @@ async fn lexica_png_original(connection: DbConn) -> Option<(ContentType, Vec<u8>
 async fn lexica_png_dithered(connection: DbConn) -> Option<(ContentType, Vec<u8>)> {
     let lexica = fetch_lexica().unwrap();
     let processed_image = process_lexica_image(&lexica);
-    give_image_to_prosperity(connection, &lexica, &processed_image);
+    give_image_to_posterity(connection, &lexica, &processed_image);
     return Some((ContentType::PNG, processed_image.dithered));
 }
 
@@ -313,7 +313,7 @@ async fn lexica_png_dithered(connection: DbConn) -> Option<(ContentType, Vec<u8>
 async fn lexica_inkplate(connection: DbConn) -> Option<Vec<u8>> {
     let lexica = fetch_lexica().unwrap();
     let processed_image = process_lexica_image(&lexica);
-    give_image_to_prosperity(connection, &lexica, &processed_image);
+    give_image_to_posterity(connection, &lexica, &processed_image);
     return Some(processed_image.inkplate);
 }
 
@@ -328,9 +328,11 @@ async fn get_config(config: &State<AppConfig>) -> Json<&AppConfig> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    flexi_logger::Logger::try_with_str("info, oxipng=error")?.start()?;
+
     let figment = Figment::from(Env::prefixed("LEXICA_INKPLATE_"));
     let config: AppConfig = figment.extract()?;
-    let db_file = format!("{}/history.sqlite", config.storage_path);
+    let db_file = format!("{}/posterity.sqlite", config.storage_path);
 
     rocket::build()
         .manage(config)
