@@ -1,10 +1,20 @@
 mod dithering;
 mod image_data;
 
+use figment::providers::Env;
+use figment::Figment;
 use image::GenericImage;
 use rand::Rng;
 
 use rocket::http::ContentType;
+use rocket::State;
+use rocket::serde::json::Json;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, PartialEq, Deserialize, Serialize)]
+struct AppConfig {
+    storage_path: String,
+}
 
 fn create_fake_headers(accept: &str) -> anyhow::Result<curl::easy::List> {
     let mut headers: curl::easy::List = curl::easy::List::new();
@@ -31,7 +41,9 @@ fn fetch_lexica() -> anyhow::Result<image::DynamicImage> {
     // on my system.
     let mut easy = curl::easy::Easy::new();
     easy.url("https://lexica.art")?;
-    let headers = create_fake_headers("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")?;
+    let headers = create_fake_headers(
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    )?;
     easy.http_headers(headers)?;
 
     let mut dst = Vec::new();
@@ -178,14 +190,36 @@ async fn lexica_png_dithered() -> Option<(ContentType, Vec<u8>)> {
 async fn lexica_inkplate() -> Option<Vec<u8>> {
     return Some(image_data::inkplate_raw(&fetch_lexica().unwrap()));
 }
+
+/*
+Just for debugging purposes.
+FIXME: remove route
+ */
+#[rocket::get("/config")]
+async fn get_config(config: &State<AppConfig>) -> Json<&AppConfig> {
+    return Json(config);
+}
+
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
+    let figment = Figment::from(Env::prefixed("LEXICA_INKPLATE_"));
+    let config: AppConfig = figment.extract()?;
+    let db_file = format!("{}/history.sqlite", config.storage_path);
+
     rocket::build()
+        .manage(config)
         .mount(
             "/",
-            rocket::routes![lexica_png_original, lexica_png_dithered, lexica_inkplate],
+            rocket::routes![
+                lexica_png_original,
+                lexica_png_dithered,
+                lexica_inkplate,
+                get_config
+            ],
         )
         .launch()
         .await
         .unwrap();
+
+    Ok(())
 }
