@@ -247,8 +247,8 @@ fn give_image_to_posterity(
             ",
             params![
                 image_id,
-                processed_image.cropped,
-                processed_image.dithered,
+                image_data::optimized_png(&processed_image.cropped),
+                image_data::optimized_png(&processed_image.dithered),
                 now
             ],
         )
@@ -286,9 +286,9 @@ fn process_lexica_image(lexica_image: &LexicaImage) -> ProcessedImage {
     let inkplate = image_data::inkplate_raw(&rotated);
 
     ProcessedImage {
-        cropped: image_data::optimized_png(&image_data::png(&cropped)),
-        dithered: image_data::optimized_png(&image_data::png(&dithered)),
-        rotated: image_data::optimized_png(&image_data::png(&rotated)),
+        cropped: image_data::png(&cropped),
+        dithered: image_data::png(&dithered),
+        rotated: image_data::png(&rotated),
         inkplate,
     }
 }
