@@ -21,3 +21,14 @@ port = 8080
 open = false
 # Disable auto-reload of the web app.
 no_autoreload = false
+
+[[hooks]]
+stage = "pre_build"
+command = "npx"
+command_arguments = [
+  "tailwindcss",
+  "-c",
+  "tailwind.config.js",
+  "-o",
+  "static/tailwind.css",
+]
