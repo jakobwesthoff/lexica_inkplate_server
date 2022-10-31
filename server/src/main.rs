@@ -272,6 +272,7 @@ impl<'r> FromRequest<'r> for DbConn {
     }
 }
 
+#[derive(Clone)]
 struct ProcessedImage {
     pub cropped: Vec<u8>,
     pub dithered: Vec<u8>,
@@ -297,7 +298,12 @@ fn process_lexica_image(lexica_image: &LexicaImage) -> ProcessedImage {
 async fn lexica_png_original(connection: DbConn) -> Option<(ContentType, Vec<u8>)> {
     let lexica = fetch_lexica().unwrap();
     let processed_image = process_lexica_image(&lexica);
-    give_image_to_posterity(connection, &lexica, &processed_image);
+    {
+        let processed_image = processed_image.clone();
+        tokio::spawn(async move {
+            give_image_to_posterity(connection, &lexica, &processed_image);
+        });
+    }
     return Some((ContentType::PNG, processed_image.cropped));
 }
 
@@ -305,7 +311,12 @@ async fn lexica_png_original(connection: DbConn) -> Option<(ContentType, Vec<u8>
 async fn lexica_png_dithered(connection: DbConn) -> Option<(ContentType, Vec<u8>)> {
     let lexica = fetch_lexica().unwrap();
     let processed_image = process_lexica_image(&lexica);
-    give_image_to_posterity(connection, &lexica, &processed_image);
+    {
+        let processed_image = processed_image.clone();
+        tokio::spawn(async move {
+            give_image_to_posterity(connection, &lexica, &processed_image);
+        });
+    }
     return Some((ContentType::PNG, processed_image.dithered));
 }
 
@@ -313,7 +324,14 @@ async fn lexica_png_dithered(connection: DbConn) -> Option<(ContentType, Vec<u8>
 async fn lexica_inkplate(connection: DbConn) -> Option<Vec<u8>> {
     let lexica = fetch_lexica().unwrap();
     let processed_image = process_lexica_image(&lexica);
-    give_image_to_posterity(connection, &lexica, &processed_image);
+
+    {
+        let processed_image = processed_image.clone();
+        tokio::spawn(async move {
+            give_image_to_posterity(connection, &lexica, &processed_image);
+        });
+    }
+
     return Some(processed_image.inkplate);
 }
 
