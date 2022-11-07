@@ -3,6 +3,7 @@ mod image_data;
 
 use std::ops::Deref;
 use std::path::Path;
+use std::sync::Mutex;
 use std::time::SystemTime;
 
 use figment::providers::Env;
@@ -20,6 +21,12 @@ use serde_json::Value;
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
 struct AppConfig {
     storage_path: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct PersistedConfig {
+    update_at_night: bool,
+    update_interval: usize,
 }
 
 fn create_fake_headers(accept: &str) -> anyhow::Result<curl::easy::List> {
@@ -335,13 +342,9 @@ async fn lexica_inkplate(connection: DbConn) -> Option<Vec<u8>> {
     return Some(processed_image.inkplate);
 }
 
-/*
-Just for debugging purposes.
-FIXME: remove route
- */
 #[rocket::get("/config")]
-async fn get_config(config: &State<AppConfig>) -> Json<&AppConfig> {
-    return Json(config);
+async fn get_config(config: &State<Mutex<PersistedConfig>>) -> Json<PersistedConfig> {
+    return Json(config.lock().unwrap().clone());
 }
 
 #[tokio::main]
@@ -351,10 +354,15 @@ async fn main() -> anyhow::Result<()> {
     let figment = Figment::from(Env::prefixed("LEXICA_INKPLATE_"));
     let config: AppConfig = figment.extract()?;
     let db_file = format!("{}/posterity.sqlite", config.storage_path);
+    let persistent_config = Mutex::new(PersistedConfig {
+        update_at_night: false,
+        update_interval: 15,
+    });
 
-    rocket::build()
+    let rocket = rocket::build()
         .manage(config)
         .manage(DbFile(db_file))
+        .manage(persistent_config)
         .mount(
             "/",
             rocket::routes![
