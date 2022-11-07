@@ -1,7 +1,14 @@
+use gloo_net::http::Request;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use web_sys::HtmlInputElement;
-use yew::events::Event;
 use yew::prelude::*;
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct PersistedConfig {
+    update_at_night: bool,
+    update_interval: usize,
+}
 
 #[function_component(App)]
 fn app() -> Html {
@@ -125,7 +132,7 @@ fn toggle(
         ],
     };
 
-    let uuid_ref = use_ref(|| Uuid::new_v4() );
+    let uuid_ref = use_ref(|| Uuid::new_v4());
     let uuid_str = format!("toggle-{}", uuid_ref);
 
     html! {
@@ -159,6 +166,15 @@ fn configuration() -> Html {
         gloo_console::log!("Toggled: ", state);
     });
 
+    let handle_button_click = Callback::from(|_| {
+        gloo_console::log!("Button clicked.");
+        wasm_bindgen_futures::spawn_local(async move {
+            let result = Request::get("/api/config").send().await.unwrap();
+            let config = result.json::<PersistedConfig>().await.unwrap();
+            gloo_console::log!(format!("{:?}", config));
+        });
+    });
+
     html! {
         <>
             <Navbar />
@@ -176,6 +192,7 @@ fn configuration() -> Html {
                     <Toggle on_toggle={handle_toggle.clone()} size={ToggleSize::Large} />
                 </OptionCard>
             </OptionList>
+            <button onclick={handle_button_click}>{"Press Me!"}</button>
         </>
     }
 }
