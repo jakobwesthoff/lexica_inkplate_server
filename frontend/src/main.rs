@@ -17,12 +17,17 @@ fn app() -> Html {
 #[function_component(Navbar)]
 fn navbar() -> Html {
     html! {
-        <nav class="h-12 flex flex-row items-center justify-between shadow-xl mb-4">
-            <h1 class="p-4">{"AI Frame"}</h1>
-            <ul class="flex flex-row items-center p-4 space-x-4">
-                <li>{"Button 1"}</li>
-                <li>{"Button 2"}</li>
-            </ul>
+        <nav class="h-14 shadow-md mb-7 border-b-2 border-purple-700 shadow-purple-700/25">
+            <div class="min-h-full mx-auto max-w-screen-md flex flex-row items-center justify-between">
+                <a href="/" class="flex items-center ml-4 md:ml-0">
+                    <img src="images/logo-128.png" class="h-8 mr-4" alt="AI Frame Logo" />
+                    <h1 class="text-2xl font-semibold whitespace-nowrap">{"AI Frame"}</h1>
+                </a>
+                <ul class="flex flex-row items-center space-x-4 mr-4 md:mr-0">
+                    <li>{"Button 1"}</li>
+                    <li>{"Button 2"}</li>
+                </ul>
+            </div>
         </nav>
     }
 }
@@ -44,7 +49,7 @@ fn option_card(
     }: &OptionCardProps,
 ) -> Html {
     html! {
-        <div class="flex flex-row items-center p-4 space-x-4 justify-between">
+        <li class="flex flex-row items-center p-4 space-x-4 justify-between">
             <div class="shrink space-y-2">
                 <h5 class="text-slate-800 text-2xl font-bold">{title}</h5>
                 <p class="text-slate-500">{details}</p>
@@ -52,17 +57,34 @@ fn option_card(
             <div class="min-w-fit">
                 {for children.iter()}
             </div>
-        </div>
+        </li>
     }
+}
+
+#[derive(PartialEq)]
+enum ToggleSize {
+    Small,
+    Medium,
+    Large,
 }
 
 #[derive(Properties, PartialEq)]
 struct ToggleProps {
     on_toggle: Callback<bool>,
+    size: Option<ToggleSize>,
+    text: Option<String>,
 }
 
 #[function_component(Toggle)]
-fn toggle(ToggleProps{on_toggle}: &ToggleProps) -> Html {
+fn toggle(
+    ToggleProps {
+        on_toggle,
+        size,
+        text,
+    }: &ToggleProps,
+) -> Html {
+    let size = size.as_ref().unwrap_or(&ToggleSize::Medium);
+
     let checkbox_ref = use_node_ref();
 
     let handle_change = {
@@ -75,12 +97,55 @@ fn toggle(ToggleProps{on_toggle}: &ToggleProps) -> Html {
         })
     };
 
+    let size_classes = match size {
+        ToggleSize::Small => vec![
+            "w-9",
+            "h-5",
+            "after:top-[2px]",
+            "after:left-[2px]",
+            "after:h-4",
+            "after:w-4",
+        ],
+        ToggleSize::Medium => vec![
+            "w-11",
+            "h-6",
+            "after:top-[2px]",
+            "after:left-[2px]",
+            "after:h-5",
+            "after:w-5",
+        ],
+        ToggleSize::Large => vec![
+            "w-14",
+            "h-7",
+            "after:top-0.5",
+            "after:left-[4px]",
+            "after:h-6",
+            "after:w-6",
+        ],
+    };
+
     html! {
         <label for="default-toggle" class="inline-flex relative items-center cursor-pointer">
             <input type="checkbox" value="" id="default-toggle" class="sr-only peer" onchange={handle_change} ref={checkbox_ref} />
-            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-            <span class="ml-3 text-sm font-medium text-gray-900 dark:text-gray-300">{"Toggle me"}</span>
+            <div class={classes!(size_classes, "bg-gray-200", "peer-focus:outline-none", "peer-focus:ring-4", "peer-focus:ring-purple-300", "rounded-full", "peer", "peer-checked:after:translate-x-full", "peer-checked:after:border-white", "after:content-['']", "after:absolute", "after:bg-white", "after:border-gray-300", "after:border", "after:rounded-full", "after:transition-all", "peer-checked:bg-purple-600")}></div>
+            if let Some(text) = text {
+                <span class="ml-3 text-sm font-medium text-gray-900 dark:text-gray-300">{text}</span>
+            }
         </label>
+    }
+}
+
+#[derive(Properties, PartialEq)]
+struct OptionListProps {
+    children: Children,
+}
+
+#[function_component(OptionList)]
+fn option_list(OptionListProps { children }: &OptionListProps) -> Html {
+    html! {
+        <ul class="divide-y divide-slate-300 max-w-screen-md md:shadow-md md:border md:rounded-lg md:border-slate-200 mx-auto">
+            {for children.iter()}
+        </ul>
     }
 }
 
@@ -93,18 +158,20 @@ fn configuration() -> Html {
     html! {
         <>
             <Navbar />
-            <OptionCard
-                title="Don't do something"
-                details="Some really nice details about doing something or not!"
-            >
-                <Toggle on_toggle={handle_toggle.clone()}/>
-            </OptionCard>
-            <OptionCard
-                title="Do something"
-                details="I want to do something about this now!"
-            >
-                <Toggle on_toggle={handle_toggle.clone()}/>
-            </OptionCard>
+            <OptionList>
+                <OptionCard
+                    title="Don't do something"
+                    details="Some really nice details about doing something or not!"
+                >
+                    <Toggle on_toggle={handle_toggle.clone()}/>
+                </OptionCard>
+                <OptionCard
+                    title="Do something"
+                    details="I want to do something about this now!"
+                >
+                    <Toggle on_toggle={handle_toggle.clone()} size={ToggleSize::Large} />
+                </OptionCard>
+            </OptionList>
         </>
     }
 }
