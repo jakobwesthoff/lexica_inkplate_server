@@ -1,3 +1,4 @@
+use uuid::Uuid;
 use web_sys::HtmlInputElement;
 use yew::events::Event;
 use yew::prelude::*;
@@ -124,9 +125,12 @@ fn toggle(
         ],
     };
 
+    let uuid_ref = use_ref(|| Uuid::new_v4() );
+    let uuid_str = format!("toggle-{}", uuid_ref);
+
     html! {
-        <label for="default-toggle" class="inline-flex relative items-center cursor-pointer">
-            <input type="checkbox" value="" id="default-toggle" class="sr-only peer" onchange={handle_change} ref={checkbox_ref} />
+        <label for={uuid_str.clone()} class="inline-flex relative items-center cursor-pointer">
+            <input type="checkbox" value="" id={uuid_str.clone()} class="sr-only peer" onchange={handle_change} ref={checkbox_ref} />
             <div class={classes!(size_classes, "bg-gray-200", "peer-focus:outline-none", "peer-focus:ring-4", "peer-focus:ring-purple-300", "rounded-full", "peer", "peer-checked:after:translate-x-full", "peer-checked:after:border-white", "after:content-['']", "after:absolute", "after:bg-white", "after:border-gray-300", "after:border", "after:rounded-full", "after:transition-all", "peer-checked:bg-purple-600")}></div>
             if let Some(text) = text {
                 <span class="ml-3 text-sm font-medium text-gray-900 dark:text-gray-300">{text}</span>
@@ -163,7 +167,7 @@ fn configuration() -> Html {
                     title="Don't do something"
                     details="Some really nice details about doing something or not!"
                 >
-                    <Toggle on_toggle={handle_toggle.clone()}/>
+                    <Toggle on_toggle={handle_toggle.clone()} size={ToggleSize::Large}/>
                 </OptionCard>
                 <OptionCard
                     title="Do something"
