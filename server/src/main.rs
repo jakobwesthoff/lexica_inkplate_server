@@ -10,7 +10,7 @@ use std::sync::Mutex;
 use figment::providers::Env;
 use figment::Figment;
 
-use lexica::{fetch_lexica, LexicaImage};
+use lexica::{fetch_lexica, LazyLexicaImage};
 use posterity::{create_posterity_db, give_image_to_posterity};
 use rocket::http::{ContentType, Status};
 use rocket::request::{FromRequest, Outcome};
@@ -73,8 +73,8 @@ pub struct ProcessedImage {
     pub inkplate: Vec<u8>,
 }
 
-fn process_lexica_image(lexica_image: &LexicaImage) -> ProcessedImage {
-    let cropped = image_data::scale_and_crop_image(&lexica_image.image);
+fn process_lazy_lexica_image(lexica_image: &LazyLexicaImage) -> ProcessedImage {
+    let cropped = image_data::scale_and_crop_image(&lexica_image.image().unwrap());
     let dithered = image_data::image_dithered(&cropped);
     let rotated = image_data::rotate_image(&dithered);
     let inkplate = image_data::inkplate_raw(&rotated);
@@ -90,11 +90,11 @@ fn process_lexica_image(lexica_image: &LexicaImage) -> ProcessedImage {
 #[rocket::get("/lexica/png/cropped")]
 async fn lexica_png_original(connection: DbConn) -> Option<(ContentType, Vec<u8>)> {
     let lexica = fetch_lexica().unwrap();
-    let processed_image = process_lexica_image(&lexica);
+    let processed_image = process_lazy_lexica_image(&lexica[0]);
     {
         let processed_image = processed_image.clone();
         tokio::spawn(async move {
-            give_image_to_posterity(connection, &lexica, &processed_image);
+            give_image_to_posterity(connection, &lexica[0], &processed_image);
         });
     }
     return Some((ContentType::PNG, processed_image.cropped));
@@ -103,11 +103,11 @@ async fn lexica_png_original(connection: DbConn) -> Option<(ContentType, Vec<u8>
 #[rocket::get("/lexica/png/dithered")]
 async fn lexica_png_dithered(connection: DbConn) -> Option<(ContentType, Vec<u8>)> {
     let lexica = fetch_lexica().unwrap();
-    let processed_image = process_lexica_image(&lexica);
+    let processed_image = process_lazy_lexica_image(&lexica[0]);
     {
         let processed_image = processed_image.clone();
         tokio::spawn(async move {
-            give_image_to_posterity(connection, &lexica, &processed_image);
+            give_image_to_posterity(connection, &lexica[0], &processed_image);
         });
     }
     return Some((ContentType::PNG, processed_image.dithered));
@@ -116,12 +116,12 @@ async fn lexica_png_dithered(connection: DbConn) -> Option<(ContentType, Vec<u8>
 #[rocket::get("/lexica/inkplate")]
 async fn lexica_inkplate(connection: DbConn) -> Option<Vec<u8>> {
     let lexica = fetch_lexica().unwrap();
-    let processed_image = process_lexica_image(&lexica);
+    let processed_image = process_lazy_lexica_image(&lexica[0]);
 
     {
         let processed_image = processed_image.clone();
         tokio::spawn(async move {
-            give_image_to_posterity(connection, &lexica, &processed_image);
+            give_image_to_posterity(connection, &lexica[0], &processed_image);
         });
     }
 

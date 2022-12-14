@@ -2,8 +2,8 @@ use std::time::SystemTime;
 
 use rusqlite::{params, Connection};
 
-use crate::{DbConn, ProcessedImage, image_data};
-use crate::lexica::LexicaImage;
+use crate::lexica::{LazyLexicaImage};
+use crate::{image_data, DbConn, ProcessedImage};
 
 pub fn create_posterity_db(connection: &Connection) {
     connection
@@ -48,7 +48,7 @@ pub fn create_posterity_db(connection: &Connection) {
 
 pub fn give_image_to_posterity(
     connection: DbConn,
-    lexica_image: &LexicaImage,
+    lexica_image: &LazyLexicaImage,
     processed_image: &ProcessedImage,
 ) {
     let image_id = &lexica_image.id;
@@ -88,7 +88,7 @@ pub fn give_image_to_posterity(
                 prompt_id,
                 lexica_image.url,
                 serde_json::to_string(&lexica_image.metadata).unwrap(),
-                image_data::optimized_png(&image_data::png(&lexica_image.image)),
+                image_data::optimized_png(&image_data::png(&lexica_image.image().unwrap())),
                 now
             ],
         )
