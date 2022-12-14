@@ -11,7 +11,7 @@ use figment::providers::Env;
 use figment::Figment;
 
 use lexica::{fetch_lexica, LazyLexicaImage};
-use posterity::{create_posterity_db, give_image_to_posterity};
+use posterity::{create_posterity_db, give_image_to_posterity, store_image_and_prompt};
 use rocket::http::{ContentType, Status};
 use rocket::request::{FromRequest, Outcome};
 use rocket::serde::json::Json;
@@ -94,7 +94,8 @@ async fn lexica_png_original(connection: DbConn) -> Option<(ContentType, Vec<u8>
     {
         let processed_image = processed_image.clone();
         tokio::spawn(async move {
-            give_image_to_posterity(connection, &lexica[0], &processed_image);
+            store_image_and_prompt(&connection, &lexica[0]);
+            give_image_to_posterity(&connection, &lexica[0], &processed_image);
         });
     }
     return Some((ContentType::PNG, processed_image.cropped));
@@ -107,7 +108,8 @@ async fn lexica_png_dithered(connection: DbConn) -> Option<(ContentType, Vec<u8>
     {
         let processed_image = processed_image.clone();
         tokio::spawn(async move {
-            give_image_to_posterity(connection, &lexica[0], &processed_image);
+            store_image_and_prompt(&connection, &lexica[0]);
+            give_image_to_posterity(&connection, &lexica[0], &processed_image);
         });
     }
     return Some((ContentType::PNG, processed_image.dithered));
@@ -121,7 +123,8 @@ async fn lexica_inkplate(connection: DbConn) -> Option<Vec<u8>> {
     {
         let processed_image = processed_image.clone();
         tokio::spawn(async move {
-            give_image_to_posterity(connection, &lexica[0], &processed_image);
+            store_image_and_prompt(&connection, &lexica[0]);
+            give_image_to_posterity(&connection, &lexica[0], &processed_image);
         });
     }
 

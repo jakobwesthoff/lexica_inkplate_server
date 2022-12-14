@@ -44,12 +44,18 @@ pub fn create_posterity_db(connection: &Connection) {
             [],
         )
         .unwrap();
+
+    connection
+        .execute(
+            "CREATE INDEX IF NOT EXISTS idx_posterity_lexixa_image ON posterity(lexica_image)",
+            [],
+        )
+        .unwrap();
 }
 
-pub fn give_image_to_posterity(
-    connection: DbConn,
+pub fn store_image_and_prompt(
+    connection: &DbConn,
     lexica_image: &LazyLexicaImage,
-    processed_image: &ProcessedImage,
 ) {
     let image_id = &lexica_image.id;
     let prompt_id = lexica_image.prompt["id"].as_str().unwrap();
@@ -93,6 +99,18 @@ pub fn give_image_to_posterity(
             ],
         )
         .unwrap();
+}
+
+pub fn give_image_to_posterity(
+    connection: &DbConn,
+    lexica_image: &LazyLexicaImage,
+    processed_image: &ProcessedImage,
+) {
+    let image_id = &lexica_image.id;
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
 
     connection
         .execute(

@@ -7,6 +7,7 @@ use serde_json::Value;
 use crate::my_curl::{get_with_curl, post_with_curl};
 
 fn fetch_image(easy: &mut Easy, url: &str) -> anyhow::Result<image::DynamicImage> {
+    println!("Fetching image: {}", url);
     let image_data = get_with_curl(easy, "image/jpeg,*/*", url)?;
     Ok(image::load_from_memory(&image_data)?)
 }
