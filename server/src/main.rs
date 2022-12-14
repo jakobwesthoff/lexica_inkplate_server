@@ -1,21 +1,22 @@
 mod dithering;
 mod image_data;
-mod my_curl;
 mod lexica;
+mod my_curl;
+mod posterity;
 
 use std::ops::Deref;
 use std::sync::Mutex;
-use std::time::SystemTime;
 
 use figment::providers::Env;
 use figment::Figment;
 
-use lexica::{LexicaImage, fetch_lexica};
+use lexica::{fetch_lexica, LexicaImage};
+use posterity::{create_posterity_db, give_image_to_posterity};
 use rocket::http::{ContentType, Status};
 use rocket::request::{FromRequest, Outcome};
 use rocket::serde::json::Json;
 use rocket::{Request, State};
-use rusqlite::{params, Connection};
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
@@ -29,7 +30,6 @@ struct PersistedConfig {
     update_interval: usize,
 }
 
-
 struct DbFile(pub String);
 impl Deref for DbFile {
     type Target = String;
@@ -38,7 +38,7 @@ impl Deref for DbFile {
         &self.0
     }
 }
-struct DbConn(pub rusqlite::Connection);
+pub struct DbConn(pub rusqlite::Connection);
 
 impl Deref for DbConn {
     type Target = Connection;
@@ -46,113 +46,6 @@ impl Deref for DbConn {
     fn deref(&self) -> &Self::Target {
         &self.0
     }
-}
-
-fn create_posterity_db(connection: &Connection) {
-    connection
-        .execute(
-            "CREATE TABLE IF NOT EXISTS lexica_image (
-        id TEXT PRIMARY KEY,
-        prompt TEXT NOT NULL,
-        url TEXT NOT NULL,
-        raw_document TEXT NOT NULL,
-        image BLOB NOT NULL,
-        stored_at INTEGER
-    )",
-            [],
-        )
-        .unwrap();
-
-    connection
-        .execute(
-            "CREATE TABLE IF NOT EXISTS lexica_prompt (
-        id TEXT PRIMARY KEY,
-        prompt TEXT NOT NULL,
-        raw_document TEXT NOT NULL,
-        stored_at INTEGER
-    )",
-            [],
-        )
-        .unwrap();
-
-    connection
-        .execute(
-            "CREATE TABLE IF NOT EXISTS posterity (
-        id INTEGER PRIMARY KEY,
-        lexica_image TEXT NOT NULL,
-        cropped_image BLOB NOT NULL,
-        dithered_image BLOB NOT NULL,
-        shown_at INTEGER
-    )",
-            [],
-        )
-        .unwrap();
-}
-
-fn give_image_to_posterity(
-    connection: DbConn,
-    lexica_image: &LexicaImage,
-    processed_image: &ProcessedImage,
-) {
-    let image_id = &lexica_image.id;
-    let prompt_id = lexica_image.prompt["id"].as_str().unwrap();
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-
-    connection
-        .execute(
-            "
-            INSERT OR IGNORE INTO lexica_prompt
-                (id, prompt, raw_document, stored_at)
-            VALUES
-                (?1, ?2, ?3, ?4)
-            ",
-            params![
-                prompt_id,
-                &lexica_image.prompt["prompt"].as_str().unwrap(),
-                serde_json::to_string(&lexica_image.prompt).unwrap(),
-                now
-            ],
-        )
-        .unwrap();
-
-    connection
-        .execute(
-            "
-            INSERT OR IGNORE INTO lexica_image
-                (id, prompt, url, raw_document, image, stored_at)
-            VALUES
-                (?1, ?2, ?3, ?4, ?5, ?6)
-            ",
-            params![
-                image_id,
-                prompt_id,
-                lexica_image.url,
-                serde_json::to_string(&lexica_image.metadata).unwrap(),
-                image_data::optimized_png(&image_data::png(&lexica_image.image)),
-                now
-            ],
-        )
-        .unwrap();
-
-    connection
-        .execute(
-            "
-            INSERT INTO posterity
-                (lexica_image, cropped_image, dithered_image, shown_at)
-            VALUES
-                (?1, ?2, ?3, ?4)
-            ",
-            params![
-                image_id,
-                image_data::optimized_png(&processed_image.cropped),
-                image_data::optimized_png(&processed_image.dithered),
-                now
-            ],
-        )
-        .unwrap();
 }
 
 #[rocket::async_trait]
@@ -173,7 +66,7 @@ impl<'r> FromRequest<'r> for DbConn {
 }
 
 #[derive(Clone)]
-struct ProcessedImage {
+pub struct ProcessedImage {
     pub cropped: Vec<u8>,
     pub dithered: Vec<u8>,
     pub rotated: Vec<u8>,
