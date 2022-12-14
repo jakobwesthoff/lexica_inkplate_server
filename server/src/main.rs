@@ -1,11 +1,13 @@
 mod dithering;
 mod image_data;
 
+use std::io::Write;
 use std::ops::Deref;
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::SystemTime;
 
+use curl::easy::Easy;
 use figment::providers::Env;
 use figment::Figment;
 use rand::Rng;
@@ -15,6 +17,7 @@ use rocket::request::{FromRequest, Outcome};
 use rocket::serde::json::Json;
 use rocket::{Request, State};
 use rusqlite::{params, Connection};
+use scraper::Html;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -55,6 +58,91 @@ struct LexicaImage {
     pub image: image::DynamicImage,
 }
 
+fn get_with_curl(easy: &mut Easy, accept: &str, url: &str) -> anyhow::Result<Vec<u8>> {
+    easy.reset();
+    easy.url(url)?;
+    let headers = create_fake_headers(accept)?;
+    easy.http_headers(headers)?;
+
+    let mut dst = Vec::new();
+    {
+        let mut transfer = easy.transfer();
+        transfer.write_function(|data| {
+            dst.extend_from_slice(data);
+            Ok(data.len())
+        })?;
+        transfer.perform()?;
+    }
+
+    Ok(dst)
+}
+
+fn post_with_curl(easy: &mut Easy, url: &str, post_data: &str) -> anyhow::Result<Vec<u8>> {
+    easy.reset();
+    easy.url(url)?;
+    let mut headers = create_fake_headers(
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    )?;
+    headers.append("Content-Type: application/json")?;
+    easy.http_headers(headers)?;
+
+    easy.post_fields_copy(post_data.as_bytes())?;
+
+    let mut dst = Vec::new();
+    {
+        let mut transfer = easy.transfer();
+        transfer.write_function(|data| {
+            dst.extend_from_slice(data);
+            Ok(data.len())
+        })?;
+        transfer.perform()?;
+    }
+
+    Ok(dst)
+}
+
+fn fetch_prompt_images(easy: &mut Easy, prompt_json: &str) -> anyhow::Result<Vec<LexicaImage>> {
+    let v: serde_json::Value = serde_json::from_str(prompt_json)?;
+    let prompts = &v["prompts"];
+
+    // FIXME: Fetch all (ideally async)
+    let prompt = &prompts[0];
+    let images = prompt["images"].as_array().unwrap();
+    let image_metadata = &images[0];
+    let image_url = format!(
+        "https://image.lexica.art/md/{}",
+        image_metadata["id"].as_str().unwrap()
+    );
+    let image_data = get_with_curl(easy, "image/jpeg,*/*", &image_url)?;
+
+    // let mut file = std::fs::File::create(format!(
+    //     "v_{}_{}",
+    //     &image["id"].as_str().unwrap(),
+    //     "output.jpg"
+    // ))?;
+    // file.write_all(&image_data)?;
+    // drop(file);
+
+    let loaded_image = image::load_from_memory(&image_data)?;
+
+    // let mut rng = rand::thread_rng();
+    // let prompt_index = rng.gen_range(0..prompts.len());
+    // let prompt = &prompts[prompt_index];
+    // let images = prompt["images"].as_array().unwrap();
+    // let image_index = rng.gen_range(0..images.len());
+    // let image_metadata = &images[image_index];
+
+    // let id = image_metadata["id"].as_str().unwrap();
+
+    Ok(vec![LexicaImage {
+        id: image_metadata["id"].as_str().unwrap().to_string(),
+        url: image_url,
+        prompt: prompt.to_owned(),
+        metadata: image_metadata.to_owned(),
+        image: loaded_image,
+    }])
+}
+
 fn fetch_lexica() -> anyhow::Result<LexicaImage> {
     // Tried this with request. However then it is detected as "non browser" and
     // terminates in the cloudflare captcha.
@@ -62,79 +150,27 @@ fn fetch_lexica() -> anyhow::Result<LexicaImage> {
     // All the headers are simply duplicated from the request the browser makes
     // on my system.
     let mut easy = curl::easy::Easy::new();
-    easy.url("https://lexica.art")?;
-    let headers = create_fake_headers(
+    // Initialize cookie tracking
+    easy.cookie_file("")?;
+
+    // Just a base request to get the CSRF cookies ;)
+    get_with_curl(
+        &mut easy,
         "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "https://lexica.art",
     )?;
-    easy.http_headers(headers)?;
+    // That is the intersting part ;)
+    let infinity_prompts_json = post_with_curl(
+        &mut easy,
+        "https://lexica.art/api/infinite-prompts",
+        "{\"text\":\"\",\"searchMode\":\"images\",\"source\":\"search\",\"cursor\":0}",
+    )?;
 
-    let mut dst = Vec::new();
-    {
-        let mut transfer = easy.transfer();
-        transfer.write_function(|data| {
-            dst.extend_from_slice(data);
-            Ok(data.len())
-        })?;
-        transfer.perform()?;
-    }
-    // println!("{}", std::str::from_utf8(&dst)?);
-
-    let document = scraper::Html::parse_document(std::str::from_utf8(&dst)?);
-    let selector = match scraper::Selector::parse("script#__NEXT_DATA__[type=\"application/json\"]")
-    {
-        Ok(selector) => Ok(selector),
-        Err(err) => Err(anyhow::anyhow!("Error parsing selector: {:?}", err)),
-    }?;
-
-    let script = document.select(&selector).next().unwrap();
-
-    let v: serde_json::Value = serde_json::from_str(script.inner_html().as_str())?;
-    let prompts = v["props"]["pageProps"]["trpcState"]["json"]["queries"][0]["state"]["data"]
-        ["pages"][0]["prompts"]
-        .as_array()
-        .unwrap();
-
-    let mut rng = rand::thread_rng();
-    let prompt_index = rng.gen_range(0..prompts.len());
-    let prompt = &prompts[prompt_index];
-    let images = prompt["images"].as_array().unwrap();
-    let image_index = rng.gen_range(0..images.len());
-    let image_metadata = &images[image_index];
-
-    let id = image_metadata["id"].as_str().unwrap();
-
-    let image_url = format!("https://image.lexica.art/md/{}", id);
-    // println!("{}", image_url);
-
-    let mut easy = curl::easy::Easy::new();
-    easy.url(image_url.as_str())?;
-
-    let headers = create_fake_headers("image/jpeg,*/*")?;
-    easy.http_headers(headers)?;
-
-    let mut dst = Vec::new();
-    {
-        let mut transfer = easy.transfer();
-        transfer.write_function(|data| {
-            dst.extend_from_slice(data);
-            Ok(data.len())
-        })?;
-        transfer.perform()?;
-    }
-
-    // let mut file = std::fs::File::create(format!("v_{}_{}", id, "output.jpg"))?;
-    // file.write_all(&dst)?;
-    // drop(file);
-
-    let image = image::load_from_memory(&dst)?;
-
-    Ok(LexicaImage {
-        id: String::from(id),
-        url: image_url,
-        prompt: prompt.to_owned(),
-        metadata: image_metadata.to_owned(),
-        image,
-    })
+    Ok(
+        fetch_prompt_images(&mut easy, std::str::from_utf8(&infinity_prompts_json)?)?
+            .pop()
+            .unwrap(),
+    )
 }
 
 struct DbFile(pub String);
