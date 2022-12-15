@@ -56,8 +56,8 @@ impl<'r> FromRequest<'r> for DbConn {
         let db_file = request.guard::<&State<DbFile>>().await.unwrap();
 
         match Connection::open(db_file.as_str()) {
-            Ok(connection) => {
-                create_posterity_db(&connection);
+            Ok(mut connection) => {
+                create_posterity_db(&mut connection);
                 Outcome::Success(DbConn(connection))
             }
             Err(_) => Outcome::Failure((Status::ServiceUnavailable, ())),
@@ -96,6 +96,13 @@ async fn lexica_png_original(connection: DbConn) -> Option<(ContentType, Vec<u8>
         tokio::spawn(async move {
             store_image_and_prompt(&connection, &lexica[0]);
             give_image_to_posterity(&connection, &lexica[0], &processed_image);
+            // Fetch other listed images for later ;)
+            // TODO: Implement loading from those images, as well as using it in
+            // all retrieval functions.
+            // SELECT COUNT(l.id) from lexica_image as l WHERE NOT EXISTS (SELECT p.id from posterity p WHERE p.lexica_image = l.id);
+            // for image in &lexica[1..11] {
+            //     store_image_and_prompt(&connection, image);
+            // }
         });
     }
     return Some((ContentType::PNG, processed_image.cropped));
@@ -148,7 +155,7 @@ async fn main() -> anyhow::Result<()> {
         update_interval: 15,
     });
 
-    let rocket = rocket::build()
+    let _rocket = rocket::build()
         .manage(config)
         .manage(DbFile(db_file))
         .manage(persistent_config)

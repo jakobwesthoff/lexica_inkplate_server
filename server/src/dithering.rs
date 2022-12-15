@@ -1,4 +1,4 @@
-use image::{DynamicImage, ImageBuffer, Luma};
+use image::ImageBuffer;
 
 type Kernel5x5 = [[u32; 5]; 5];
 #[derive(Debug, Copy, Clone)]
@@ -182,7 +182,6 @@ pub fn apply_error_diffusion(
     dither: Dithering,
     palette: Vec<u32>,
 ) -> ImageBuffer<image::Rgba<u8>, Vec<u8>> {
-
     for y in 0..image.height() {
         for x in 0..image.width() {
             let original_pixel = get_pixel(&image, x, y);

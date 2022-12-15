@@ -1,6 +1,7 @@
-use std::time::SystemTime;
-
 use image::{DynamicImage, GenericImage};
+use jpegxl_rs::encode::{EncoderResult, EncoderSpeed};
+use jpegxl_rs::encoder_builder;
+use std::time::Instant;
 
 use crate::dithering;
 
@@ -86,24 +87,32 @@ pub fn png(image: &DynamicImage) -> Vec<u8> {
     out_bytes
 }
 
-pub fn optimized_png(input_png: &[u8]) -> Vec<u8> {
-    let start = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_millis();
-    let options = oxipng::Options::from_preset(2);
-    let optimized = oxipng::optimize_from_memory(input_png, &options).unwrap();
-    let end = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_millis();
-    println!("optimization took {}ms", end-start);
-    return optimized;
+pub fn jpegxl(image: &DynamicImage) -> Vec<u8> {
+    let start = Instant::now();
+
+    let raw_image = image.to_rgb().into_raw();
+    let mut encoder = encoder_builder()
+        .lossless(true)
+        .speed(EncoderSpeed::Falcon)
+        .build()
+        .unwrap();
+
+    let encodedu8: EncoderResult<u8> = encoder
+        .encode(&raw_image, image.width(), image.height())
+        .unwrap();
+
+    let end = Instant::now();
+    println!("jpegxl encoding took {:?}", end - start);
+
+    encodedu8.data
+}
+
+pub fn jpegxl_from_data(image_data: &Vec<u8>) -> Vec<u8> {
+    let image = image::load_from_memory(&image_data).unwrap();
+    jpegxl(&image)
 }
 
 pub fn image_dithered(image: &DynamicImage) -> DynamicImage {
-    let mut out_bytes: Vec<u8> = Vec::new();
-
     let dithered = dithering::apply_error_diffusion(
         image.to_rgba().clone(),
         dithering::jarvis_judice_ninke(),

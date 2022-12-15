@@ -1,6 +1,6 @@
 [package]
 name = "lexica_inkplate_server"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -19,20 +19,13 @@ rocket = { version = "0.5.0-rc.2", features = ["json"] }
 rusqlite = { version = "0.28.0", features = ["bundled"] }
 figment = { version = "0.10.8", features = ["env"] }
 serde = { version = "1.0.147", features = ["derive"] }
-oxipng = { version = "7", default-features = false, features = [
-  "binary",
-  "clap",
-  "filetime",
-  "parallel",
-  "rayon",
-  "wild",
-  "zopfli",
-] }
 flexi_logger = "0.24.0"
+jpegxl-rs = { version = "0.7.0", features = ["vendored"] }
+rusqlite_migration = "1.0.1"
 # seamcarving = "0.2.3"
 
-# [profile.release]
-# panic = "abort"
-# lto = true
-# codegen-units = 1
-# incremental = false
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1
+incremental = false

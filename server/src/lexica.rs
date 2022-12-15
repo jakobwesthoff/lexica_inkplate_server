@@ -12,7 +12,10 @@ fn fetch_image(easy: &mut Easy, url: &str) -> anyhow::Result<image::DynamicImage
     Ok(image::load_from_memory(&image_data)?)
 }
 
-fn fetch_prompt_images(easy: &mut Easy, prompt_json: &str) -> anyhow::Result<Vec<LazyLexicaImage>> {
+fn fetch_prompt_images(
+    _easy: &mut Easy,
+    prompt_json: &str,
+) -> anyhow::Result<Vec<LazyLexicaImage>> {
     // let start = Instant::now();
     let v: serde_json::Value = serde_json::from_str(prompt_json)?;
     let prompts = &v["prompts"];
