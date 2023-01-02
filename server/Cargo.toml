@@ -1,14 +1,13 @@
 [package]
 name = "lexica_inkplate_server"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 anyhow = "1.0.65"
-# curl = { version = "0.4.44", default_features = false, features = ["ssl", "static-ssl"] }
-curl = { version = "0.4.44" }
+curl = { version = "0.4.44", features = ["static-ssl"] }
 image = { version = "0.19" }
 smartcrop = { git = "https://github.com/bekh6ex/smartcrop.rs.git" }
 rand = "0.8.5"
@@ -22,10 +21,11 @@ serde = { version = "1.0.147", features = ["derive"] }
 flexi_logger = "0.24.0"
 jpegxl-rs = { version = "0.7.0", features = ["vendored"] }
 rusqlite_migration = "1.0.1"
+openssl-sys = { version = "0.9.79", features = ["vendored"] }
 # seamcarving = "0.2.3"
 
 [profile.release]
 panic = "abort"
 lto = true
 codegen-units = 1
-incremental = false
+#incremental = false

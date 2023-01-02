@@ -1,19 +1,25 @@
-ARG ARCH=
-FROM ${ARCH}rust:1.64.0-buster as builder
+FROM ${ARCH}debian:bullseye AS base
+#
+# Install Rust
+RUN apt-get update && apt-get install -y curl
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly
 
-# Trick to cache all used dependencies
-RUN USER=root cargo new --bin lexica_inkplate_server
-WORKDIR /lexica_inkplate_server
-COPY ./Cargo.toml ./Cargo.toml
-RUN cargo build --release
-RUN rm src/*.rs
+ENV PATH=/root/.cargo/bin:$PATH
 
+# Switch Rust to the nightly bui
+RUN rustup toolchain install nightly
+RUN rustup install nightly
+
+RUN apt-get install -y build-essential
+
+FROM base as builder
+WORKDIR /source
+RUN apt-get install -y cmake
 ADD . ./
-
-RUN rm ./target/release/deps/lexica_inkplate_server*
+ENV CARGO_UNSTABLE_SPARSE_REGISTRY=true
 RUN cargo build --release
 
-FROM ${ARCH}debian:buster-slim
+FROM ${ARCH}debian:bullseye-slim
 ARG APP=/app
 
 RUN apt-get update \
@@ -28,7 +34,7 @@ RUN groupadd $APP_USER \
     && useradd -g $APP_USER $APP_USER \
     && mkdir -p ${APP}
 
-COPY --from=builder /lexica_inkplate_server/target/release/lexica_inkplate_server ${APP}/lexica_inkplate_server
+COPY --from=builder /source/target/release/lexica_inkplate_server ${APP}/lexica_inkplate_server
 
 RUN chown -R $APP_USER:$APP_USER ${APP}
 

@@ -12,6 +12,7 @@ use figment::Figment;
 
 use lexica::{fetch_lexica, LazyLexicaImage};
 use posterity::{create_posterity_db, give_image_to_posterity, store_image_and_prompt};
+use rand::Rng;
 use rocket::http::{ContentType, Status};
 use rocket::request::{FromRequest, Outcome};
 use rocket::serde::json::Json;
@@ -90,7 +91,9 @@ fn process_lazy_lexica_image(lexica_image: &LazyLexicaImage) -> ProcessedImage {
 #[rocket::get("/lexica/png/cropped")]
 async fn lexica_png_original(connection: DbConn) -> Option<(ContentType, Vec<u8>)> {
     let lexica = fetch_lexica().unwrap();
-    let processed_image = process_lazy_lexica_image(&lexica[0]);
+    let mut rng = rand::thread_rng();
+    let image_index = rng.gen_range(0..lexica.len());
+    let processed_image = process_lazy_lexica_image(&lexica[image_index]);
     {
         let processed_image = processed_image.clone();
         tokio::spawn(async move {
@@ -111,7 +114,9 @@ async fn lexica_png_original(connection: DbConn) -> Option<(ContentType, Vec<u8>
 #[rocket::get("/lexica/png/dithered")]
 async fn lexica_png_dithered(connection: DbConn) -> Option<(ContentType, Vec<u8>)> {
     let lexica = fetch_lexica().unwrap();
-    let processed_image = process_lazy_lexica_image(&lexica[0]);
+    let mut rng = rand::thread_rng();
+    let image_index = rng.gen_range(0..lexica.len());
+    let processed_image = process_lazy_lexica_image(&lexica[image_index]);
     {
         let processed_image = processed_image.clone();
         tokio::spawn(async move {
@@ -125,7 +130,9 @@ async fn lexica_png_dithered(connection: DbConn) -> Option<(ContentType, Vec<u8>
 #[rocket::get("/lexica/inkplate")]
 async fn lexica_inkplate(connection: DbConn) -> Option<Vec<u8>> {
     let lexica = fetch_lexica().unwrap();
-    let processed_image = process_lazy_lexica_image(&lexica[0]);
+    let mut rng = rand::thread_rng();
+    let image_index = rng.gen_range(0..lexica.len());
+    let processed_image = process_lazy_lexica_image(&lexica[image_index]);
 
     {
         let processed_image = processed_image.clone();

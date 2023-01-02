@@ -24,8 +24,9 @@ fn fetch_prompt_images(
     for prompt in prompts.as_array().unwrap() {
         for image in prompt["images"].as_array().unwrap() {
             let image_url = format!(
-                "https://image.lexica.art/md/{}",
-                image["id"].as_str().unwrap()
+                "https://lexica-serve-encoded-images2.sharif.workers.dev/md2/{}",
+                //"https://image.lexica.art/md/{}",
+                image["id"].as_str().unwrap(),
             );
             lazy_images.push(LazyLexicaImage::new(
                 image["id"].as_str().unwrap().to_string(),
